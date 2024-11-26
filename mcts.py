@@ -10,6 +10,8 @@ class Node(object):
         self.valid_actions = valid_actions
         self.update_probabilities()
 
+        assert self.depth == 10 - len(valid_actions)
+
     def choose_action(self):
         p = self.probabilities / np.sum(self.probabilities)
         action = np.random.choice(len(p), p=p)
@@ -19,12 +21,14 @@ class Node(object):
         assert action in self.valid_actions
 
         self.rewards[action] *= np.exp(1.7**(self.depth - 9) * reward / prob)
+        self.rewards /= np.sum(self.rewards)
 
         self.update_probabilities()
     
     def update_probabilities(self):
-        self.probabilities = self.rewards / np.sum(self.rewards)
-        self.probabilities *= (1 - self.n**(-0.3))
+        # self.probabilities = self.rewards / np.sum(self.rewards)
+        # self.probabilities *= (1 - self.n**(-0.3))
+        self.probabilities = self.rewards * (1 - self.n**(-0.3))
         self.probabilities[self.valid_actions] += self.n**(-0.3) / len(self.valid_actions)
     
     def strategy_vector(self):
@@ -47,9 +51,9 @@ class MCTS(object):
         paths = [[] for _ in range(n_players)]
         terminal = False
 
+        depth = 1
         while not terminal:
             actions = []
-            depth = 1
             for i in range(n_players):
                 if not in_tree[i]:
                     action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
@@ -62,7 +66,7 @@ class MCTS(object):
                         curr_node = Node(n, depth, self.game.n_actions(curr_infosets[i]), self.game.valid_actions(curr_infosets[i], i))
                         self.nodes[i][curr_infosets[i]] = curr_node
                         in_tree[i] = False
-                    
+
                     paths[i].append((curr_infosets[i], action, prob))
                 
                 actions.append(action)
