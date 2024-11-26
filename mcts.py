@@ -17,9 +17,15 @@ class Node(object):
 
     def update_reward(self, reward, action, prob):
         assert action in self.valid_actions
-
         self.rewards[action] *= np.exp(1.7**(self.depth - 9) * reward / prob)
-
+        ## NOTE: when reward blows up to inf, make it deterministic by setting all other rewards to 0
+        if np.any(np.isposinf(self.rewards)):
+            new_rewards = np.zeros_like(self.rewards, dtype=int)
+            new_rewards[np.isposinf(self.rewards)] = 1 
+            self.rewards = np.copy(new_rewards)
+        # NOTE: not sure why this happened
+        if np.all(self.rewards == 0):
+            self.rewards[self.valid_actions] = 1
         self.update_probabilities()
     
     def update_probabilities(self):
@@ -47,9 +53,9 @@ class MCTS(object):
         paths = [[] for _ in range(n_players)]
         terminal = False
 
+        depth = 1
         while not terminal:
             actions = []
-            depth = 1
             for i in range(n_players):
                 if not in_tree[i]:
                     action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
@@ -75,6 +81,7 @@ class MCTS(object):
                 self.nodes[i][infoset].update_reward(rewards[i], action, prob)
     
     def get_strategy(self, player, infoset_txt_file):
+        count = 0
         lines = open(infoset_txt_file).readlines()
         # Initially, set the tensor with all ones. We will mask out the illegal actions below,
         # and then we will normalize row-wise just before saving the tensor below.
@@ -87,6 +94,7 @@ class MCTS(object):
             n = n // 2
 
             if line in self.nodes[player]:
+                count += 1
                 tensor[idx] = self.nodes[player][line].strategy_vector()
 
             for j in range(n):
@@ -103,6 +111,7 @@ class MCTS(object):
                 print(idx, 'done out of', len(lines))
         # Renormalize row wise
         tensor /= np.sum(tensor, axis=1)[:,None]
+        print(f'Lines changed for player {player}: {count}')
         np.save(f'pttt_pl{player}.npy', tensor)
 
             
