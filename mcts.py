@@ -8,6 +8,7 @@ class Node(object):
         self.rewards = np.zeros(n_actions)
         self.rewards[valid_actions] = 1
         self.valid_actions = valid_actions
+        self.visits = 0
         self.update_probabilities()
 
     def choose_action(self):
@@ -17,15 +18,14 @@ class Node(object):
 
     def update_reward(self, reward, action, prob):
         assert action in self.valid_actions
-        self.rewards[action] *= np.exp(1.7**(self.depth - 9) * reward / prob)
+        new_action_reward = self.rewards[action] * np.exp(1.7**(self.depth - 9) * reward / prob)
+        if new_action_reward != 0:
+            self.rewards[action] = new_action_reward
         ## NOTE: when reward blows up to inf, make it deterministic by setting all other rewards to 0
         if np.any(np.isposinf(self.rewards)):
-            new_rewards = np.zeros_like(self.rewards, dtype=int)
+            new_rewards = np.zeros_like(self.rewards, dtype=int) + 10 ** -50
             new_rewards[np.isposinf(self.rewards)] = 1 
             self.rewards = np.copy(new_rewards)
-        # NOTE: not sure why this happened
-        if np.all(self.rewards == 0):
-            self.rewards[self.valid_actions] = 1
         self.update_probabilities()
     
     def update_probabilities(self):
@@ -63,6 +63,7 @@ class MCTS(object):
                     if curr_infosets[i] in self.nodes[i]:
                         curr_node = self.nodes[i][curr_infosets[i]]
                         action, prob = curr_node.choose_action()
+                        curr_node.visits += 1
                     else:
                         action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
                         curr_node = Node(n, depth, self.game.n_actions(curr_infosets[i]), self.game.valid_actions(curr_infosets[i], i))
