@@ -83,11 +83,11 @@ class PTTTGame:
         if player == 0: # to augment strategies, such that if opp has winning spot then block it immediately
             board = self._build_player_board(infoset, player)
             opp_spots = self._find_winning_spots(board, 1)
-            # player_spots = self._find_winning_spots(board, 0)
+            player_spots = self._find_winning_spots(board, 0)
             if len(opp_spots) > 0:
                 valid_actions = opp_spots
-            # elif len(player_spots) > 0:
-            #     valid_actions = player_spots
+            elif len(player_spots) > 0:
+                valid_actions = player_spots
 
         return np.array(valid_actions)
 

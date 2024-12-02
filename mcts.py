@@ -31,7 +31,8 @@ class Node(object):
         return action, p[action]
 
     def update_reward(self, reward, action, prob, n):
-        assert (action in self.valid_actions, action, self.valid_actions)
+        # assert (action in self.valid_actions, action, self.valid_actions)
+        assert action in self.valid_actions
         ## EXP-3
         # new_action_reward = self.rewards[action] * np.exp(1.7**(self.depth - 9) * reward / prob)
         # if new_action_reward != 0:
@@ -69,10 +70,38 @@ class Node(object):
         return self.avg_probabilities
 
 class MCTS(object):
-    def __init__(self, game, num_iters) -> None:
+    def __init__(self, game, num_iters, infoset_txt_files = None) -> None:
         self.game = game
         self.num_iters = num_iters
         self.nodes = [{} for _ in range(len(game.roots))]
+        self.infoset_txt_files = infoset_txt_files
+        if infoset_txt_files is not None:
+            print('preprocessing infosets') # groups all infosets with same set of * (success) and . (fail)
+            mapping_infosets = [{} for _ in range(len(infoset_txt_files))]
+            for i in range(len(infoset_txt_files)):
+                infoset_txt_file = infoset_txt_files[i]
+                lines = open(infoset_txt_file).readlines()
+                
+                # reduced_infosets = {}
+                for idx, line in enumerate(lines):
+                    line = line.strip()
+                    successful = []
+                    failed = []
+                    for j in range(1, len(line), 2):
+                        if line[j+1] == '*':
+                            successful.append(int(line[j]))
+                        else:
+                            failed.append(int(line[j]))
+                    successful.sort()
+                    failed.sort()
+                    mapping_infosets[i][line] = (tuple(successful), tuple(failed))
+                    # reduced_infosets[(tuple(successful), tuple(failed))] = (np.zeros(9), 0)
+
+                    if idx % 1000000 == 0:
+                        print(idx, 'done out of', len(lines))
+                        
+            self.mapping_infosets = mapping_infosets
+
 
     def solve(self, sample=False):
         for n in range(self.num_iters):
@@ -158,18 +187,36 @@ class MCTS(object):
                 if not in_tree[i]:
                     action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
                 else:
-                    if curr_infosets[i] in self.nodes[i]:
-                        curr_node = self.nodes[i][curr_infosets[i]]
-                        action, prob = curr_node.choose_action()
-                        curr_node.visits += 1
+                    if self.infoset_txt_files is not None:
+                        if curr_infosets[i] in self.mapping_infosets[i]:
+                            mapped_infoset = self.mapping_infosets[i][curr_infosets[i]]
+                            if mapped_infoset in self.nodes[i]:
+                                curr_node = self.nodes[i][mapped_infoset]
+                                action, prob = curr_node.choose_action()
+                                curr_node.visits += 1
+                            else:
+                                action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
+
+                                assert depth == (len(curr_infosets[i]) - 1) // 2 + 1
+
+                                curr_node = Node(n, depth, self.game.n_actions(curr_infosets[i]), self.game.valid_actions(curr_infosets[i], i))
+                                self.nodes[i][mapped_infoset] = curr_node
+                                in_tree[i] = False
+                        else:
+                            action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
                     else:
-                        action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
+                        if curr_infosets[i] in self.nodes[i]:
+                            curr_node = self.nodes[i][curr_infosets[i]]
+                            action, prob = curr_node.choose_action()
+                            curr_node.visits += 1
+                        else:
+                            action, prob = self.game.choose_uniform_action(curr_infosets[i], i)
 
-                        assert depth == (len(curr_infosets[i]) - 1) // 2 + 1
+                            assert depth == (len(curr_infosets[i]) - 1) // 2 + 1
 
-                        curr_node = Node(n, depth, self.game.n_actions(curr_infosets[i]), self.game.valid_actions(curr_infosets[i], i))
-                        self.nodes[i][curr_infosets[i]] = curr_node
-                        in_tree[i] = False
+                            curr_node = Node(n, depth, self.game.n_actions(curr_infosets[i]), self.game.valid_actions(curr_infosets[i], i))
+                            self.nodes[i][curr_infosets[i]] = curr_node
+                            in_tree[i] = False
 
                     paths[i].append((curr_infosets[i], action, prob))
                 
@@ -180,7 +227,12 @@ class MCTS(object):
 
         for i in range(n_players):
             for infoset, action, prob in paths[i][::-1]:
-                self.nodes[i][infoset].update_reward(rewards[i], action, prob, n)
+                if self.infoset_txt_files is not None:
+                    if infoset in self.mapping_infosets[i]:
+                        mapped_infoset = self.mapping_infosets[i][infoset]
+                        self.nodes[i][mapped_infoset].update_reward(rewards[i], action, prob, n)
+                else:
+                    self.nodes[i][infoset].update_reward(rewards[i], action, prob, n)
         # print(self.nodes[0]['|'].rewards)
     
     def get_strategy(self, player, infoset_txt_file, alpha=None):
@@ -189,6 +241,42 @@ class MCTS(object):
         lines = open(infoset_txt_file).readlines()
         # Initially, set the tensor with all ones. We will mask out the illegal actions below,
         # and then we will normalize row-wise just before saving the tensor below.
+        if self.infoset_txt_files is not None:
+            tensor = np.ones((len(lines), 9), dtype=np.float32)
+            
+            for idx, line in enumerate(lines):
+                line = line.strip() # Remove the \n
+                assert line.startswith('|')
+                n = len(line) - 1
+                assert n % 2 == 0
+                n = n // 2
+
+                mapped_infoset = self.mapping_infosets[player][line]
+                if mapped_infoset in self.nodes[player]:
+                    if line == '|':
+                        self.nodes[player][mapped_infoset].update_probabilities(test_param=4)
+                        # print("fdfdsfd", self.nodes[player][line].rewards, self.nodes[player][line].probabilities)
+                    # count += 1
+                    tensor[idx] = self.nodes[player][mapped_infoset].strategy_vector()
+
+                for j in range(n):
+                    pos = line[1 + 2 * j]
+                    outcome = line[2 + 2 * j]
+                    assert outcome in '*.'
+                    assert pos in '012345678'
+                    pos = int(pos)
+                    # Set zero probability to illegal actions. (Remember that we cannot probe a cell
+                    # more than once!)
+                    tensor[idx,pos] = 0
+                
+                if idx % 1000000 == 0:
+                    print(idx, 'done out of', len(lines))
+
+            # Renormalize row wise
+            tensor /= np.sum(tensor, axis=1)[:,None]
+            # print(f'Lines changed for player {player}: {count}')
+            np.save(f'pttt_pl{player}.npy', tensor)
+            return
 
         print('preprocessing infosets') # groups all infosets with same set of * (success) and . (fail)
         if alpha is not None:
@@ -223,8 +311,8 @@ class MCTS(object):
             if line in self.nodes[player]:
                 if line == '|':
                     self.nodes[player][line].update_probabilities(test_param=4)
-                    print("fdfdsfd", self.nodes[player][line].rewards, self.nodes[player][line].probabilities)
-                count += 1
+                    # print("fdfdsfd", self.nodes[player][line].rewards, self.nodes[player][line].probabilities)
+                # count += 1
                 tensor[idx] = self.nodes[player][line].strategy_vector()
                 if alpha is not None:
                     strat, count = reduced_infosets[mapping_infosets[line]]
@@ -263,7 +351,7 @@ class MCTS(object):
 
         # Renormalize row wise
         tensor /= np.sum(tensor, axis=1)[:,None]
-        print(f'Lines changed for player {player}: {count}')
+        # print(f'Lines changed for player {player}: {count}')
         np.save(f'pttt_pl{player}.npy', tensor)
 
             
